@@ -8,6 +8,7 @@ ADMM for proximal operator of l_1-norm.
 """
 
 import numpy as np
+import scipy
 
 def prox_l1_admm(Dtilde, w0, gamma, rho, max_iter, tol):
     """
@@ -26,6 +27,7 @@ def prox_l1_admm(Dtilde, w0, gamma, rho, max_iter, tol):
     """
     
     # Initialize variables
+    DtildeT = Dtilde.T
     w = w0.copy()  # Initialize solution w
     np_len = len(w0)
     I_np = np.eye(np_len)
@@ -35,12 +37,14 @@ def prox_l1_admm(Dtilde, w0, gamma, rho, max_iter, tol):
     
     # Soft-threshold function
     soft = lambda t, T: np.maximum(t - T, 0) + np.minimum(t + T, 0)
+
+    cho_facts = scipy.linalg.cho_factor(A, lower=False, overwrite_a=True, check_finite=False)
     
     # ADMM iterations
     for k in range(max_iter):
         # Update w
-        b = (1 / gamma) * w + rho * Dtilde.T @ v - Dtilde.T @ la
-        w_new = np.linalg.solve(A, b)
+        b = (1 / gamma) * w + rho * DtildeT @ v - DtildeT @ la
+        w_new = scipy.linalg.cho_solve(cho_facts, b, overwrite_b=True, check_finite=False)
         
         # Update v
         v_new = soft(Dtilde @ w_new + (1 / rho) * la, 1 / rho)
