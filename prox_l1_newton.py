@@ -41,7 +41,7 @@ def prox_l1_newton(Dtilde, w0, gamma, max_iter, tol):
     Aj = BCOO.from_scipy_sparse(A)
 
     n, p = Dtilde.shape
-    x = np.asarray(np.linalg.pinv(A.todense()))@b
+    x = scipy.sparse.linalg.spsolve(A, b)
     
     px = lambda x: np.maximum(np.minimum(x, gamma), -gamma)
     jpx = lambda x: jnp.maximum(jnp.minimum(x, gamma), -gamma)
@@ -68,8 +68,7 @@ def prox_l1_newton(Dtilde, w0, gamma, max_iter, tol):
         gI = g[Ih]
         
         # Update w
-        PA = np.asarray(np.linalg.pinv(AI.todense()))
-        _x_new = (PA@gI).squeeze()
+        _x_new = scipy.sparse.linalg.spsolve(AI, gI)
         
         # Update v
         Fks, _x_news = jax.vmap(_line_search,in_axes=(0,None,None,None))(step_sizes, Ih, jnp.array(x), jnp.array(_x_new))
