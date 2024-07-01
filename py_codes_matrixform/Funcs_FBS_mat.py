@@ -8,6 +8,7 @@ functions for GME3-CC matrix form.
 """
 
 import numpy as np
+import scipy
 
 def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter):
     """
@@ -32,6 +33,7 @@ def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter):
     U = V @ D.T  # Initialize variable U
     La = np.zeros_like(U)  # Initialize multiplier matrix
     A = (1 / gamma) * I_n + rho * (D.T @ D)
+    cho_facts = scipy.linalg.cho_factor(A, lower=False, overwrite_a=True, check_finite=False)
     
     # Soft-threshold function
     soft = lambda t, T: np.maximum(t - T, 0) + np.minimum(t + T, 0)
@@ -43,7 +45,9 @@ def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter):
         # V_new = np.linalg.solve(A, B)
         #########
         # Try Chester's algorithm here.
-        V_new = BB @ (np.linalg.inv(A))  # vanilla method.
+        #V_new = BB @ (np.linalg.inv(A))  # vanilla method.
+        V_new = scipy.linalg.cho_solve(cho_facts, BB.T, overwrite_b=True, check_finite=False)
+        V_new = V_new.T
         #########
         
         # introduce temp matrix 
@@ -77,7 +81,8 @@ def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter):
         V = V_new
         U = U_new
         La = La_new
-    
+
+    print(f'primal res {primal_res:.3f} dual res {dual_res:.3f}')
     # Calculate solution u = x + \gamma * z
     V_opt = V_new
     # iter_admm = k
@@ -93,6 +98,99 @@ def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter):
 
 # w_opt = prox_l1_admm(Dtilde, w0, gamma, rho, max_iter, tol)
 # print("Optimized w:", w_opt)
+
+def tconjgrad(A, b, gamma=np.inf, x0=None, max_iter=1e5, tol=1e-10):
+    """Truncated Conjugate Gradient Method
+    ======
+
+    Truncated Conjugate gradient method for solving the quadratic
+    \\[ \min_x tr(X^TAX) - tr(X^Tb) s.t. ||x_t||_2 <= \gamma for each column x_t of X \\]
+    where \\(A\\) is \\(n\\times n\\), and \\(x\\) and \\(b\\) are \\(n\\times m\\).
+
+    Parameters
+    ----------
+    A : (n,n) numpy array or scipy sparse matrix
+        Left hand side of linear equation.
+    b : (n,k) numpy array
+        Right hand side of linear equation.
+    gamma : float
+        Bound on the norm of the columns of X
+    x0 : (n,k) numpy array (optional)
+        Initial guess. If not provided, then x0=0.
+    max_iter : int (optional), default = 1e5
+        Maximum number of iterations.
+    tol : float (optional), default = 1e-10
+        Tolerance for stopping conjugate gradient iterations.
+
+    Returns
+    -------
+    x : (n,k) numpy array
+    """
+
+    if x0 is None:
+        x = np.zeros_like(b)
+    else:
+        x = x0.copy()
+
+    r = b - A@x
+    p = r.copy()
+    rsold = np.sum(r**2,axis=0)
+  
+    err = 1 
+    i = 0
+    while (err > tol) and (i < max_iter):
+        i += 1
+        Ap = A @ p
+        alpha = rsold / np.sum(p * Ap, axis=0)
+        x_new = x + alpha * p
+        
+        # Check and enforce the truncation condition
+        norm_x_new = np.linalg.norm(x_new, axis=0)
+        over_limit = norm_x_new > gamma
+        if np.any(over_limit):
+            pk_norm_sq = np.sum(p**2, axis=0)
+            xk_pk_dot = np.sum(x * p, axis=0)
+            discriminant = xk_pk_dot**2 + (gamma**2 - np.sum(x**2, axis=0)) * pk_norm_sq
+            t = np.where(over_limit,
+                         (-xk_pk_dot + np.sqrt(discriminant)) / pk_norm_sq,
+                         alpha)
+            x_new = x + t * p
+
+        x = x_new
+        r = b - A @ x
+        rsnew = np.sum(r**2, axis=0)
+        err = np.sqrt(np.sum(rsnew))
+        p = r + (rsnew / rsold) * p
+        rsold = rsnew
+    return x
+
+def prox_mat_l21_tcg(D, W0, gamma, tol, max_iter):
+    """
+    Compute the 3rd iteration of the algorithm (matrix form)
+    
+    Parameters:
+    D (numpy.ndarray): Matrix D.
+    W0 (numpy.ndarray): Input matrix.
+    gamma (float): Regularization parameter.
+    max_iter (int): Maximum number of iterations.
+    
+    Returns:
+    numpy.ndarray: The optimized matrix V_opt.
+    """
+    
+    # Initialize variables
+    DT = D.T
+    y = W0.copy()
+    b = D @ y.T
+    A = D @ DT
+    x = np.zeros_like(b)
+    
+    # tcg iterations
+    x = tconjgrad(A, b, gamma=gamma, x0=None, max_iter=max_iter, tol=tol)
+    primal = y - (DT@x).T
+    print(f'duality gap: {gamma*np.sum(np.linalg.norm(D@primal.T,axis=1)) - np.trace(primal @ D.T @ x):.3f}')
+    
+    return primal
 
 
 def MPD(V_0, C, A, alpha_k=0.1, tol=1e-8, max_iterations=1000):
