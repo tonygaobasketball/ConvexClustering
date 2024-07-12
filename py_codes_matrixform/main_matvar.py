@@ -36,11 +36,11 @@ plt.title(f'Two half moons data (n = {n})')
 plt.grid(True)
 plt.show()
 
-#%% Matrix D and C.
+#%% Matrix D and C. (Euclidean)
 
 # Example usage
-k_nearest = n-1  # Number of nearest neighbors to find
-# k_nearest = 9
+# k_nearest = n-1  # Number of nearest neighbors to find
+k_nearest = 9
 incidence_matrices = build_incidence_matrix(mat_x, k_nearest)  # Build the incidence matrices
 
 # # Print the incidence matrices for each column
@@ -80,6 +80,76 @@ sig1_C = np.linalg.norm(C, 2)
 
 # # Singular value of Ctilde
 # sig1_C = np.linalg.norm(C.toarray(), 2)
+
+#%% Matrix D and C. (weighted)
+#--------------------
+# Diffusion distance based D and weights.
+#--------------------
+
+# k_nearest = n-1  # Number of nearest neighbors to find
+k_nearest = 9
+
+diff_t = 1
+diff_l = n-1
+
+_, diff_dis = diff_map(mat_x, diff_t, diff_l)
+incidence_matrices = build_incidence_matrix_diff(mat_x, diff_dis, k_nearest)  # Build the incidence matrices
+
+# # Print the incidence matrices for each column
+# for j, A_j in enumerate(incidence_matrices):
+#     print(f"Incidence matrix for column {j+1}:\n{A_j}\n")
+    
+# Stack the matrices vertically
+Stacked_incidence_matrices = np.vstack(incidence_matrices)
+D = delete_redundant_rows(Stacked_incidence_matrices)
+# print(f"Matrix D: \n{D}\n")
+sig1_D = np.linalg.norm(D, 2)
+
+
+# Define identity matrices
+I_p = eye(p).toarray()
+I_n = eye(n).toarray()
+
+# Put Gaussian weights on edges. Equivalent to multiply weights
+# on diagonals of C.
+weights_mat = Gauss_weight_diff_k_nrst(mat_x, diff_t, diff_l, k_nearest) 
+weights_vec = extract_nonzero_elements(D, weights_mat)
+
+C = eye(D.shape[0]).toarray() @ np.diag(weights_vec) # Let matrix C be idenity.
+
+# Singular value of Ctilde
+sig1_C = np.linalg.norm(C, 2)
+
+#%% Matrix D and C. (weighted)
+#--------------------
+# Euclidean distance based D and weights.
+#--------------------
+
+k_nearest = n-1  # Number of nearest neighbors to find
+# k_nearest = 9
+
+incidence_matrices = build_incidence_matrix(mat_x, k_nearest)  # Build the incidence matrices
+
+# Stack the matrices vertically
+Stacked_incidence_matrices = np.vstack(incidence_matrices)
+D = delete_redundant_rows(Stacked_incidence_matrices)
+# print(f"Matrix D: \n{D}\n")
+sig1_D = np.linalg.norm(D, 2)
+
+
+# Define identity matrices
+I_p = eye(p).toarray()
+I_n = eye(n).toarray()
+
+# Put Gaussian weights on edges. Equivalent to multiply weights
+# on diagonals of C.
+weights_mat = Gauss_weight_k_nrst(mat_x, k_nearest) 
+weights_vec = extract_nonzero_elements(D, weights_mat)
+
+C = eye(D.shape[0]).toarray() @ np.diag(weights_vec) # Let matrix C be idenity.
+
+# Singular value of Ctilde
+sig1_C = np.linalg.norm(C, 2)
 #%% Generate connected graph with data and the edges in D.
 import numpy as np
 import matplotlib.pyplot as plt
@@ -132,7 +202,7 @@ plot_graph(nodes, incidence_matrix)
 # Set parameters
 rho = 1
 mu = 1
-c_rate = 2**-18
+c_rate = 2**-1
 # c_rate = 0.01
 
 gamma_up = 1 / (sig1_D * sig1_C)**2
@@ -189,7 +259,7 @@ filename = 'temp.gif'
 # **********************
 # Loop through each frame
 with imageio.get_writer(filename, mode='I', duration=0.5) as writer:
-    for i in range(numFrames):
+    for i in range(numFrames+1):
         # Clear the figure
         plt.figure()
             
@@ -197,7 +267,7 @@ with imageio.get_writer(filename, mode='I', duration=0.5) as writer:
         # ===========
         # GME3-CC model
     
-        c_rate = 4 ** (- numFrames + i - 0)
+        c_rate = 2 ** (- numFrames + i - -2)
         # gamma = 1/(4 * sig1_C ** 2) * c_rate   # gamma <= 1/(4 * sig_max(Ctilde)^2)
         gamma_up = 1 / (sig1_D * sig1_C)**2
         gamma = gamma_up * c_rate

@@ -8,7 +8,218 @@ functions for GME3-CC matrix form.
 """
 
 import numpy as np
-import scipy
+from scipy import sparse
+import time
+
+
+def tconjgrad(A, b, gamma, tol = 1e-08, max_iter = 1e+04):
+    """
+    truncated conjugate gradient method. 
+    
+    By Chester Holtz
+    """
+    
+    # Initialize x and M.
+    n = len(b)
+    x = np.zeros_like(b)
+    M0 = sparse.identity(n)
+    M = lambda x : M0@x
+    
+    # print("shapes: A, b ,x.")
+    # print(A.shape)
+    # print(b.shape)
+    # print(x.shape)
+    
+    r = b - A @ x
+    z = M(r)
+    p = z.copy()
+    rsold = np.sum(r * z, axis=0)
+
+    err = 1
+    i = 0
+    info = {'res': [], 'time': []}
+    inittime = time.time()     # start counting CPU time.
+    while (err > tol) and (i < max_iter):
+        i += 1
+        Ap = A @ p
+        alpha = rsold / np.sum(p * Ap,axis=0)
+        # update x
+        x += alpha * p
+
+        # add additional condition (check if norm(x^k) <= gamma)
+        if np.linalg.norm(x) > gamma:
+            p_sqr = np.sum(p * p, axis = 0)
+            x_sqr = np.sum(x * x, axis = 0)
+            xp = np.sum(x * p, axis = 0)
+            nume = - xp + np.sqrt(xp ** 2 - x_sqr * p_sqr)
+            t = nume / p_sqr
+            x += t * p
+            info['res'].append(np.linalg.norm(A @ x - b))
+            info['time'].append(time.time() - inittime)
+            return x, info
+        
+        r -= alpha * Ap
+        z = M(r)
+        rsnew = np.sum(r * z, axis=0)
+        err = np.sqrt(np.sum(rsnew))
+        p = z + (rsnew / rsold) * p
+        rsold = rsnew
+        info['res'].append(np.linalg.norm(A @ x - b))
+        info['time'].append(time.time() - inittime)
+        
+    return x, info
+
+
+def tconjgrad_nb(H, b, gamma, tol = 1e-08, max_iter = 1e+04):
+    """
+    truncated conjugate gradient method. 
+    Nicolas Boumal's notes (Spring 2023)
+    
+    Solving problem:
+        min 1/2 v.T H v - b.T v
+        s.t.      ||v||_2 <= gamma
+                    v \in R^n.
+    
+    """
+    
+    # Initialize v.
+    v = np.zeros_like(b)
+    rold = b.copy()
+    p = rold
+
+    err = 1
+    i = 0
+    info = {'res': [], 'time': [], 'steps': []}
+    inittime = time.time()     # start counting CPU time.
+    while (err > tol) and (i < max_iter):
+        i += 1
+        Hp = H @ p
+        pHp = np.sum(p * Hp,axis=0)
+        alpha = np.dot(rold, rold) / pHp
+        v += alpha * p
+        
+        if pHp <=0 or np.linalg.norm(v) >= gamma:
+            ps = np.dot(p, p)
+            vs = np.dot(v, v)
+            vp = np.dot(v, p)
+            nume = -vp + np.sqrt(vp ** 2 - ps * (vs - gamma ** 2))
+            t = nume / ps
+            v += t * p
+            info['res'].append(np.linalg.norm(H @ v - b))
+            info['time'].append(time.time() - inittime)
+            info['steps'].append(i)
+        
+            return v, info
+        
+        rnew = rold - alpha * Hp
+
+        # if np.linalg.norm(rnew) <= np.min(tol, np.linalg.norm(b)):
+        #     return v, info
+        err = np.linalg.norm(rnew)
+        
+        beta = np.dot(rnew, rnew) / np.dot(rold, rold)
+        p = rnew + beta * p
+        rold = rnew
+
+        info['res'].append(np.linalg.norm(H @ v - b))
+        info['time'].append(time.time() - inittime)
+        info['steps'].append(i)
+
+    return v, info
+
+def truncated_conjugate_gradient(H, g, delta, tol=1e-8, max_iter=None):
+    """
+    Truncated Conjugate Gradient Method for solving trust-region subproblem
+    
+    Parameters:
+    H : numpy.ndarray
+        Symmetric positive-definite Hessian matrix.
+    g : numpy.ndarray
+        Gradient vector.
+    delta : float
+        Trust region radius.
+    tol : float, optional
+        Tolerance for convergence (default is 1e-8).
+    max_iter : int, optional
+        Maximum number of iterations (default is size of g).
+        
+    Returns:
+    s : numpy.ndarray
+        Solution vector.
+    n_iter : int
+        Number of iterations performed.
+    """
+    n = len(g)
+    s = np.zeros(n)
+    r = -g
+    d = r
+    rsold = np.dot(r, r)
+    err = 1
+    i = 0
+    
+    while (err > tol) and (i < max_iter):
+        Hd = H @ d
+        alpha = rsold / np.dot(d, Hd)
+        
+        if np.linalg.norm(s + alpha * d) > delta:
+            d_sqr = np.dot(d, d)
+            s_sqr = np.dot(s, s)
+            sd = np.dot(s, d)
+            nume = - sd + np.sqrt(sd ** 2 - s_sqr * d_sqr)
+            t = nume / d_sqr
+            s = s + t * d
+            return s, i + 1
+        
+        s = s + alpha * d
+        r = r - alpha * Hd
+        rsnew = np.dot(r, r)
+        
+        err = np.sqrt(rsnew)
+        
+        d = r + (rsnew / rsold) * d
+        rsold = rsnew
+    
+    return s, i + 1
+
+
+def prox_mat_l21_tcg(D, W0, gamma, tol = 1e-08, max_iter = 1e+04):
+    """
+    Compute the 3rd iteration of the algorithm (matrix form)
+    with truncated conjugate gradient method. 
+    
+    By Chester Holtz
+    
+    Parameters:
+    D (numpy.ndarray): Matrix D.
+    W0 (numpy.ndarray): Input matrix.
+    gamma (float): Regularization parameter.
+    max_iter (int): Maximum number of iterations.
+    tol (float): Tolerance for convergence.
+    
+    Returns:
+    numpy.ndarray: The optimized matrix V_opt.
+    """
+    
+    # Initialize variables
+    p, n = W0.shape  
+    
+    # A = DD^T
+    # B = DW^T, each b is a column of B.
+    A = D @ D.T
+    B = D @ W0.T
+    m = A.shape[0]
+    La_new = np.zeros((p, m))
+    for j in range(p): 
+        b = B[:,j]
+        u,info = tconjgrad_nb(A, b, gamma, tol, max_iter)
+        print("dim {}: tCG Converged in {} iterations.".format(j, info['steps'][0]))
+        # u,_ = truncated_conjugate_gradient(A, -b,  gamma, tol, max_iter)
+        La_new[j,:] = u
+    return La_new
+    
+        
+    
+    
 
 def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter):
     """
@@ -33,7 +244,6 @@ def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter):
     U = V @ D.T  # Initialize variable U
     La = np.zeros_like(U)  # Initialize multiplier matrix
     A = (1 / gamma) * I_n + rho * (D.T @ D)
-    cho_facts = scipy.linalg.cho_factor(A, lower=False, overwrite_a=True, check_finite=False)
     
     # Soft-threshold function
     soft = lambda t, T: np.maximum(t - T, 0) + np.minimum(t + T, 0)
@@ -45,9 +255,7 @@ def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter):
         # V_new = np.linalg.solve(A, B)
         #########
         # Try Chester's algorithm here.
-        #V_new = BB @ (np.linalg.inv(A))  # vanilla method.
-        V_new = scipy.linalg.cho_solve(cho_facts, BB.T, overwrite_b=True, check_finite=False)
-        V_new = V_new.T
+        V_new = BB @ (np.linalg.inv(A))  # vanilla method.
         #########
         
         # introduce temp matrix 
@@ -81,8 +289,7 @@ def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter):
         V = V_new
         U = U_new
         La = La_new
-
-    print(f'primal res {primal_res:.3f} dual res {dual_res:.3f}')
+    
     # Calculate solution u = x + \gamma * z
     V_opt = V_new
     # iter_admm = k
@@ -98,99 +305,6 @@ def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter):
 
 # w_opt = prox_l1_admm(Dtilde, w0, gamma, rho, max_iter, tol)
 # print("Optimized w:", w_opt)
-
-def tconjgrad(A, b, gamma=np.inf, x0=None, max_iter=1e5, tol=1e-10):
-    """Truncated Conjugate Gradient Method
-    ======
-
-    Truncated Conjugate gradient method for solving the quadratic
-    \\[ \min_x tr(X^TAX) - tr(X^Tb) s.t. ||x_t||_2 <= \gamma for each column x_t of X \\]
-    where \\(A\\) is \\(n\\times n\\), and \\(x\\) and \\(b\\) are \\(n\\times m\\).
-
-    Parameters
-    ----------
-    A : (n,n) numpy array or scipy sparse matrix
-        Left hand side of linear equation.
-    b : (n,k) numpy array
-        Right hand side of linear equation.
-    gamma : float
-        Bound on the norm of the columns of X
-    x0 : (n,k) numpy array (optional)
-        Initial guess. If not provided, then x0=0.
-    max_iter : int (optional), default = 1e5
-        Maximum number of iterations.
-    tol : float (optional), default = 1e-10
-        Tolerance for stopping conjugate gradient iterations.
-
-    Returns
-    -------
-    x : (n,k) numpy array
-    """
-
-    if x0 is None:
-        x = np.zeros_like(b)
-    else:
-        x = x0.copy()
-
-    r = b - A@x
-    p = r.copy()
-    rsold = np.sum(r**2,axis=0)
-  
-    err = 1 
-    i = 0
-    while (err > tol) and (i < max_iter):
-        i += 1
-        Ap = A @ p
-        alpha = rsold / np.sum(p * Ap, axis=0)
-        x_new = x + alpha * p
-        
-        # Check and enforce the truncation condition
-        norm_x_new = np.linalg.norm(x_new, axis=0)
-        over_limit = norm_x_new > gamma
-        if np.any(over_limit):
-            pk_norm_sq = np.sum(p**2, axis=0)
-            xk_pk_dot = np.sum(x * p, axis=0)
-            discriminant = xk_pk_dot**2 + (gamma**2 - np.sum(x**2, axis=0)) * pk_norm_sq
-            t = np.where(over_limit,
-                         (-xk_pk_dot + np.sqrt(discriminant)) / pk_norm_sq,
-                         alpha)
-            x_new = x + t * p
-
-        x = x_new
-        r = b - A @ x
-        rsnew = np.sum(r**2, axis=0)
-        err = np.sqrt(np.sum(rsnew))
-        p = r + (rsnew / rsold) * p
-        rsold = rsnew
-    return x
-
-def prox_mat_l21_tcg(D, W0, gamma, tol, max_iter):
-    """
-    Compute the 3rd iteration of the algorithm (matrix form)
-    
-    Parameters:
-    D (numpy.ndarray): Matrix D.
-    W0 (numpy.ndarray): Input matrix.
-    gamma (float): Regularization parameter.
-    max_iter (int): Maximum number of iterations.
-    
-    Returns:
-    numpy.ndarray: The optimized matrix V_opt.
-    """
-    
-    # Initialize variables
-    DT = D.T
-    y = W0.copy()
-    b = D @ y.T
-    A = D @ DT
-    x = np.zeros_like(b)
-    
-    # tcg iterations
-    x = tconjgrad(A, b, gamma=gamma, x0=None, max_iter=max_iter, tol=tol)
-    primal = y - (DT@x).T
-    print(f'duality gap: {gamma*np.sum(np.linalg.norm(D@primal.T,axis=1)) - np.trace(primal @ D.T @ x):.3f}')
-    
-    return primal
 
 
 def MPD(V_0, C, A, alpha_k=0.1, tol=1e-8, max_iterations=1000):
@@ -288,6 +402,7 @@ def build_incidence_matrix(U, k):
         incidence_matrices.append(A_j.T)
     
     return incidence_matrices
+
 
 
 # # Example usage

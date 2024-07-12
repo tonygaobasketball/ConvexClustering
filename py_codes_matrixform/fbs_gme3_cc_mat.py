@@ -35,7 +35,7 @@ def fbs_gme3_cc_mat(D, C, sig1_C, mu, rho, gamma, U0, mat_x):
         - cput (float): CPU time running by the algorithm.
     """
     STOP_TOL = 1e-6
-    Max_Iters = 200
+    Max_Iters = 2000
 
     p,n = mat_x.shape  # record dimension of data.
     B = C @ D  # Define parameter B
@@ -84,10 +84,18 @@ def fbs_gme3_cc_mat(D, C, sig1_C, mu, rho, gamma, U0, mat_x):
         # iterate Z^k
         Z = (UD_old - V) @ C.T @ B 
         
-        # ADMM iteration for U^k+1
         W = mat_x + gamma * Z
-        U = prox_mat_l21_admm(D, W, gamma, rho_admm, tol_admm, max_iter_admm)
-
+        # #********
+        # # ADMM iteration for U^k+1
+        # U = prox_mat_l21_admm(D, W, gamma, rho_admm, tol_admm, max_iter_admm)
+        # #********
+        
+        #********
+        # tCG for solving U^k+1 (By Chester Holtz)
+        La = prox_mat_l21_tcg(D, W, gamma)
+        U = W - La @ D
+        #********
+        
         # Calculate residue
         relative_delta = np.linalg.norm((U - U_old) @ D.T, 'fro') / np.linalg.norm(UD_old, 'fro')
 
