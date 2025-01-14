@@ -1,5 +1,5 @@
 """
-Project: Convex clustering with general Moreau envelope.
+Project: Convex clustering with general Moreau envelope (GME-CC).
 
 Function tools.
 
@@ -191,8 +191,6 @@ def plot_clusters(AL):
 ##### -------------------------
 from sklearn.metrics import pairwise_distances
 
-from sklearn.metrics import pairwise_distances
-
 
 def gaussian_kernel_matrix(D, p = 0.01):
     """
@@ -311,8 +309,8 @@ def Gauss_weight_k_nrst (dataX, k_nrst):
         # The first must be zero. Disgard the first item.
         sig[i] = np.median(smallest_elements)
     
-    # Standardize sig
-    sig = sig / np.max(sig)
+    # # Standardize sig
+    # sig = sig / np.max(sig)
     
     weights = np.zeros((n,n))
     # for i in range(n):
@@ -322,7 +320,7 @@ def Gauss_weight_k_nrst (dataX, k_nrst):
     
     for i in range(n):
         for j in range(n):
-            weights[i,j] = np.exp(- np.linalg.norm(dataX[:,i] - dataX[:,j]) ** 2 / (sig[i] * sig[j]) )
+            weights[i,j] = np.exp(-E_dis[i,j] ** 2 / (sig[i] * sig[j]) )
             
     return weights
     
@@ -466,7 +464,7 @@ def extract_nonzero_elements(D, W):
     # Record W_ij.
     # Output array with W_ij.
     
-    m, n = D.shape
+    # m, n = D.shape
     weights_vec = []
     
     for row in D:
@@ -476,4 +474,292 @@ def extract_nonzero_elements(D, W):
             weights_vec.append(W[i, j])
     
     return np.array(weights_vec)
+
+
+def get_edge_indices(D):
+    """
+    Given an incidence matrix D, return a list of tuples representing the edges.
     
+    Parameters:
+    D (numpy.ndarray): The incidence matrix where rows represent edges and columns represent vertices.
+    
+    Returns:
+    edges (list of tuples): A list of tuples where each tuple (i, j) represents an edge between vertex i and vertex j.
+    """
+    edges = []
+    num_edges, num_vertices = D.shape
+    
+    for edge_index in range(num_edges):
+        # Find the indices of non-zero entries in the row corresponding to the edge
+        vertices = np.where(D[edge_index] != 0)[0]
+        
+        if len(vertices) == 2:
+            edges.append(tuple(vertices))
+    
+    return edges
+
+def gaussian_dist(dataX, sigma = 2):
+    """
+    Calculating Gaussian weights between x^i and x^j  
+        w_ij = exp (-|| x^i - x^j ||^2 / sigma)
+
+    input:  dataX --- data matrix (n by p), each column a point.
+
+            
+    output:
+        weights --- weights matrix.
+    """
+    # find sigma_i for x^i.
+    n = dataX.shape[0]
+    
+    # Calculate Euclidean distance between x^i and x^j 
+    weights = np.zeros((n,n))
+    for i in range(n):
+        for j in range(i, n):
+            norm_ij = np.linalg.norm(dataX[i,:] - dataX[j,:])
+            weights[i,j] = np.exp(- norm_ij ** 2 / sigma)
+            weights[j,i] = weights[i,j]
+    
+    return weights
+
+
+def gaussian_log_dist(dataX, base = 2, sigma = 2):
+    """
+    Calculating Gaussian weights between x^i and x^j  
+        w_ij = log(exp (-|| x^i - x^j ||^2 / sigma))
+
+    input:  dataX --- data matrix (n by p), each column a point.
+
+            
+    output:
+        log_weights --- log_weights matrix.
+    """
+    # find sigma_i for x^i.
+    n = dataX.shape[0]
+    
+    # Calculate Euclidean distance between x^i and x^j 
+    log_weights = np.zeros((n,n))
+    for i in range(n):
+        for j in range(i, n):
+            norm_ij = np.linalg.norm(dataX[i,:] - dataX[j,:])
+            log_weights[i,j] = base ** (- norm_ij ** 2 / sigma)
+            log_weights[j,i] = log_weights[i,j]
+    
+    return log_weights
+
+
+
+import networkx as nx
+
+def find_clusters(A):
+    """
+    Eric's code: in R package "cvxclustr" for convex clustering
+    
+    Identifies the connected components of the adjacency graph.
+
+    Parameters:
+    - A (scipy.sparse matrix or numpy.ndarray): Adjacency matrix representing the graph.
+
+    Returns:
+    - dict: A dictionary containing:
+        - 'cluster': An array where each entry indicates the cluster ID of each node.
+        - 'size': An array with the sizes of each cluster.
+    """
+    # Convert the adjacency matrix A to a NetworkX graph
+    G = nx.from_numpy_matrix(A, create_using=nx.Graph)
+
+    # Initialize variables
+    n = A.shape[0]
+    cluster = np.zeros(n, dtype=int)
+    k = 1
+
+    # Use BFS to find connected components
+    node_seen = np.zeros(n, dtype=bool)
+    for i in range(n):
+        if not node_seen[i]:
+            connected_set = list(nx.bfs_tree(G, source=i).nodes)
+            node_seen[connected_set] = True
+            cluster[connected_set] = k
+            k += 1
+
+    # Count the number of clusters and sizes
+    nClusters = k - 1
+    size = np.array([np.sum(cluster == j) for j in range(1, nClusters + 1)])
+    
+    return {'cluster': cluster, 'size': size}
+
+def check_weights(w_union):
+    w_min = np.min(w_union)
+    w_max = np.max(w_union)
+    w_mean = np.mean(w_union)
+    w_std = np.std(w_union) 
+    # # Plot boxplot
+    # plt.figure(figsize=(6, 4))
+    # plt.boxplot(w_union, vert=False, patch_artist=True, boxprops=dict(facecolor="lightblue", color="black"), 
+    #             whiskerprops=dict(color="black"), capprops=dict(color="black"), medianprops=dict(color="red"))
+    # plt.title("Boxplot of w_union")
+    # plt.xlabel("Values")
+    # plt.grid(True, axis="x", linestyle="--", alpha=0.7)
+    # # Show plot
+    # plt.show()
+    
+    return w_min, w_max, w_mean, w_std
+
+#%% Generate clustering data (Gaussian clusters)
+import random
+
+# Function to generate Gaussian clusters (your existing code)
+def generate_gaussian_clusters(K, n, N, overlap_factor=0.05, random_seed=1):
+    np.random.seed(random_seed)
+    data = []
+    labels = []
+    means = []
+    covariances = []
+
+    for k in range(K):
+        mean = np.random.uniform(-1, 1, n)
+        means.append(mean)
+        covariance = np.random.rand(1) * np.eye(n) * 0.5
+        covariance *= overlap_factor
+        covariances.append(covariance)
+        cluster_data = np.random.multivariate_normal(mean, covariance, N)
+        data.append(cluster_data)
+        labels.extend([k] * N)
+
+    data = np.vstack(data)
+    labels = np.array(labels)
+    return data, labels, means, covariances
+
+# Function to generate corner Gaussian clusters
+def generate_gaussian_clusters_corner(K, n, N, overlap_factor=0.05, random_seed=1):
+    from itertools import product
+    """
+    
+    Generate Gaussian Clusters at the corners of unit boxes.
+    K >= 2.
+    
+    """
+    np.random.seed(random_seed)
+    data = []
+    labels = []
+    selected_means = []
+    covariances = []
+    # Generate all combinations of 1 and -1 for p dimensions
+    means = np.array(list(product([1, -1], repeat = n)))
+    scale_para = overlap_factor   # scale the covariance.
+    
+    # randomly select K of corners, and generate Gaussian clusters.
+    random.seed(random_seed)
+    selected = random.sample(range(means.shape[0]), K)
+    for k in selected:
+        mean = means[k, :]  # find mean coordinate
+        selected_means.append(mean)
+        # covariance = np.random.rand(1) * np.eye(n)  # generate covariance
+        covariance = scale_para * np.eye(n)    # generate identity covariance
+        covariances.append(covariance)
+        cluster_data = np.random.multivariate_normal(mean, covariance, N)
+        data.append(cluster_data)
+        labels.extend([k] * N)
+
+    data = np.vstack(data)
+    labels = np.array(labels)
+    return data, labels, selected_means, covariances
+
+
+# Function to generate Gaussian clusters 2d mean fixed.
+def generate_gaussian_clusters_2dmean(K, n, N, overlap_factor=0.05, random_seed=1):
+    np.random.seed(random_seed)
+    data = []
+    labels = []
+    means = []
+    covariances = []
+    
+    
+
+    for k in range(K):
+        if n == 2:
+            mean = np.random.uniform(-1.5, 1.5, n)
+        if n > 2:
+            mean_2d = np.random.uniform(-1.5, 1.5, 2)
+            mean = np.concatenate([mean_2d, np.zeros(n-2)])
+        means.append(mean)
+        covariance = np.random.rand(1) * np.eye(n)*0.5
+        covariance *= overlap_factor
+        covariances.append(covariance)
+        cluster_data = np.random.multivariate_normal(mean, covariance, N)
+        data.append(cluster_data)
+        labels.extend([k] * N)
+
+    data = np.vstack(data)
+    labels = np.array(labels)
+    return data, labels, means, covariances
+
+# Function to generate Gaussian clusters 2d mean fixed.
+def generate_gaussian_clusters_low4high_dim(K, p_low, p_high, N, overlap_factor=0.05, random_seed=1):
+    """
+    Generate low dim and project to high dim data by adding zeros.
+
+    Parameters
+    ----------
+    K : TYPE
+        DESCRIPTION.
+    p_low : TYPE
+        DESCRIPTION.
+    p_high : TYPE
+        DESCRIPTION.
+    N : TYPE
+        DESCRIPTION.
+    overlap_factor : TYPE, optional
+        DESCRIPTION. The default is 0.05.
+    random_seed : TYPE, optional
+        DESCRIPTION. The default is 1.
+
+    Returns
+    -------
+    data : TYPE
+        DESCRIPTION.
+    labels : TYPE
+        DESCRIPTION.
+    means : TYPE
+        DESCRIPTION.
+    covariances : TYPE
+        DESCRIPTION.
+
+    """
+    
+    np.random.seed(random_seed)
+    data = []
+    labels = []
+    means = []
+    covariances = []
+    n = p_high
+    
+
+    for k in range(K):
+        mean_low = np.random.uniform(-1.5, 1.5, p_low)
+        mean_high = np.concatenate([mean_low, np.zeros(p_high - p_low)])
+        means.append(mean_high)
+        covariance_low = np.random.rand(1) * np.eye(p_low)*0.5
+        covariance_low *= overlap_factor
+        covariances.append(covariance_low)
+        cluster_data_low = np.random.multivariate_normal(mean_low, covariance_low, N)
+        cluster_data_high = np.concatenate([cluster_data_low, np.zeros((N, p_high - p_low))], axis = 1)
+        data.append(cluster_data_high)
+        labels.extend([k] * N)
+    data = np.vstack(data)
+    labels = np.array(labels)       
+        
+        
+        
+        # mean = np.concatenate([mean_low, np.zeros(p_high - p_low)])
+        # means.append(mean)
+        # covariance = np.random.rand(1) * np.eye(n)*0.5
+        # covariance *= overlap_factor
+        # covariances.append(covariance)
+        # cluster_data = np.random.multivariate_normal(mean, covariance, N)
+        # data.append(cluster_data)
+        # labels.extend([k] * N)
+
+    # data = np.vstack(data)
+    # labels = np.array(labels)
+    return data, labels, means, covariances
