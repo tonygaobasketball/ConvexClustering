@@ -22,10 +22,10 @@ import time
 
 # Parameters
 K = 4                 # number of clusters
-p = 100                 # dimension
+p = 20                 # dimension
 n_in_cluster = 5 * 1  # number of data points in each cluster
 n = K * n_in_cluster  # total number of data points
-rand_seed = 1
+rand_seed = 10
 
 k_nrst = n_in_cluster - 1
 # k_nrst = n - 1
@@ -143,8 +143,8 @@ rho = 1
 mu = 1
 #------------------------------
 # Define the number of frames (linear frame)
-numFrames = 1000
-gamma_up = 1 / sig1_B**2 + 5
+numFrames = 200
+gamma_up = 1 / sig1_B ** 2 + 50
 gamma_cand = np.linspace(1e-06, gamma_up, numFrames)
 #------------------------------
 

@@ -15,7 +15,7 @@ import scipy as sp
 import matplotlib.pyplot as plt
 
 
-def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter):
+def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter = 500):
     """
     Compute the 3rd iteration of the algorithm (matrix form)
     
@@ -59,7 +59,8 @@ def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter):
         U_new = np.zeros(U.shape)
         for j in range(U.shape[1]):
             temp = 1 - 1/np.linalg.norm(M_temp[:,j],2)
-            U[:,j] = max(0, temp) * M_temp[:,j] / rho
+            # U[:,j] = max(0, temp) * M_temp[:,j] / rho
+            U_new[:,j] = max(0, temp) * M_temp[:,j] / rho
         
         
         # Update Lambda (Lagrangian multipliers)
@@ -99,7 +100,8 @@ def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter):
 
 
 
-def MPD(V_0, C, A, alpha_k=0.5, tol=1e-8, max_iterations=500):
+
+def MPD(V_0, B, A, alpha_k=0.5, tol=1e-8, max_iterations=500):
     """
     Matrix Proximal Descent 
     Compute the 1st iteration of the algorithm.
@@ -107,9 +109,8 @@ def MPD(V_0, C, A, alpha_k=0.5, tol=1e-8, max_iterations=500):
     
     Parameters:
     V0 (numpy.ndarray): Input matrix.
-    C (numpy.ndarray): Matrix C.
-    sig1_C (float):  the largest singular value of C.
-    A (numpy.ndarray): Matrix U * D' * C'.
+    B (numpy.ndarray): Matrix B.
+    A (numpy.ndarray): Matrix U * B^T.
     alpha_k (float): Step size.
     max_iterations (int): Maximum number of iterations.
     tol (float): Tolerance for convergence.
@@ -120,8 +121,8 @@ def MPD(V_0, C, A, alpha_k=0.5, tol=1e-8, max_iterations=500):
     
     V = V_0.copy()
     for k in range(max_iterations):
-        Y = np.array(V @ (np.eye(C.shape[1]) - alpha_k * C.T @ C) - alpha_k * A @ C)
-        
+        # Y = np.array(V @ (np.eye(C.shape[1]) - alpha_k * C.T @ C) - alpha_k * A @ C)
+        Y = V - alpha_k * (V - A)
         V_new = np.zeros_like(V)
         for j in range(V.shape[1]):
             Y_j = Y[:, j]
@@ -178,8 +179,8 @@ def fbs_gme3_cc_mat(D, C, sig1_C, gamma, U0, mat_x):
     Max_Iters = 10
 
     p,n = mat_x.shape  # record dimension of data.
-    B = C @ D  # Define parameter B
     Dw = C @ D
+    B = Dw  # Define parameter B
 
     # Initialization
     U = U0.copy()
@@ -189,15 +190,16 @@ def fbs_gme3_cc_mat(D, C, sig1_C, gamma, U0, mat_x):
 
     # Matrix Proximal Descent parameters.
     V_old = np.ones((p,Dw.shape[0]))
-    mat_A_MPD = UDw_old @ C.T
-    step_size_MPD = 1.5 / (sig1_C ** 2)
+    mat_A_MPD = U @ B.T
+    # step_size_MPD = 1.5 / (sig1_C ** 2)
+    step_size_MPD = 0.5
     tol_MPD = 1e-4
     max_iter_MPD = 20
     
     # ADMM parameters.
-    rho_admm = 10   # \rho-Lipschitz
-    tol_admm = 1e-4
-    max_iter_admm = 100
+    rho_admm = 2   # \rho-Lipschitz
+    tol_admm = 1e-5
+    max_iter_admm = 50
 
     iter = 0
     relative_delta = np.inf  # Stopping criteria value
@@ -205,7 +207,7 @@ def fbs_gme3_cc_mat(D, C, sig1_C, gamma, U0, mat_x):
     start_time = time.time()   # count CPU time.
     # mu_fbs (float): Parameter of FBS algorithm.
     # la_fbs (float): Parameter of FBS algorithm.
-    mu_fbs = 1
+    mu_fbs = .5
     la_fbs = 1
 
     while (relative_delta > STOP_TOL) and (iter < Max_Iters):
@@ -214,10 +216,11 @@ def fbs_gme3_cc_mat(D, C, sig1_C, gamma, U0, mat_x):
         # MPD iteration for V^k
         C_MPD = np.eye(C.shape[0])
         mat_A_MPD = UDw_old @ C_MPD.T
-        V = MPD(V_old, C_MPD, mat_A_MPD, step_size_MPD, tol_MPD, max_iter_MPD)
+        V = MPD(V_old, B, mat_A_MPD, step_size_MPD, tol_MPD, max_iter_MPD)
 
         # iterate Z^k
-        Z = (UDw_old - V) @ C.T @ B 
+        # Z = (UDw_old - V) @ C.T @ B 
+        Z = (UDw_old - V) @ B 
         
         W = (1 - mu_fbs) * U_old + mu_fbs * (mat_x + gamma * Z) 
         

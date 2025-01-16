@@ -101,7 +101,7 @@ rho = 1
 mu = 1
 #------------------------------
 # Define the number of frames (linear frame)
-numFrames = 10
+numFrames = 100
 gamma_up = 1 / sig1_B**2 + 5
 gamma_cand = np.linspace(1e-06, gamma_up, numFrames)
 #------------------------------
