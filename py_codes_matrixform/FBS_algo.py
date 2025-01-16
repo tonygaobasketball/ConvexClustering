@@ -14,6 +14,82 @@ import imageio
 import scipy as sp
 import matplotlib.pyplot as plt
 
+def prox_mat_l21_admm_cholsolve(D, W0, gamma, rho, tol, max_iter=500):
+    """
+    Compute the 3rd iteration of the algorithm (matrix form)
+    
+    Parameters:
+    D (numpy.ndarray): Matrix D.
+    W0 (numpy.ndarray): Input matrix.
+    gamma (float): Regularization parameter.
+    rho (float): Penalty parameter for ADMM.
+    max_iter (int): Maximum number of iterations.
+    tol (float): Tolerance for convergence.
+    
+    Returns:
+    numpy.ndarray: The optimized matrix V_opt.
+    """
+    
+    # Initialize variables
+    V = W0.copy()  # Initialize solution W
+    p, n = V.shape  
+    I_n = np.eye(n)
+    U = V @ D.T  # Initialize variable U
+    La = np.zeros_like(U)  # Initialize multiplier matrix
+    A = (1 / gamma) * I_n + rho * (D.T @ D)
+    c, low = cho_factor(A)
+    
+    gW0 = (1 / gamma) * W0
+    rD = rho*D
+    
+    # Soft-threshold function
+    soft = lambda t, T: np.maximum(t - T, 0) + np.minimum(t + T, 0)
+    
+    # ADMM iterations
+    for k in range(max_iter):
+        # Update V^(k+1)
+        BB = gW0 +  U @ rD - La @ D
+        #V_new = BB @ (np.linalg.inv(A))  # vanilla method.
+        X = cho_solve((c, low), BB.T, overwrite_b=False, check_finite=False)
+        V_new = X.T
+        
+        # introduce temp matrix 
+        M_temp = La + V_new @ rD.T
+        
+        # Update U^(k+1)
+        eps = 1e-12
+        M_temp_norms = np.linalg.norm(M_temp, axis=0)
+        idx_nonzero = (M_temp_norms > eps)
+        shrink_raw = np.zeros_like(M_temp_norms)
+        shrink_raw[idx_nonzero] = 1.0 - 1.0 / M_temp_norms[idx_nonzero]
+        shrink_clamped = np.maximum(shrink_raw, 0.0)
+        shrink_factors = shrink_clamped / rho
+        U_new = M_temp * shrink_factors
+        
+        # Update Lambda (Lagrangian multipliers)
+        temp = V_new @ D.T - U_new
+        La_new = La + rho * (temp)
+        
+        # Calculate the residuals.
+        primal_res = np.linalg.norm(temp, 'fro')
+        dual_res = np.linalg.norm(rho * (V_new - V), 'fro')
+        
+        # Check for convergence
+        if primal_res < tol and dual_res < tol:
+            print(f"ADMM Converged in {k+1} iterations.")
+            break
+        
+        # Update variables
+        V = V_new
+        U = U_new
+        La = La_new
+    
+    # Calculate solution u = x + \gamma * z
+    V_opt = V_new
+    if k == max_iter - 1:
+        print(f"ADMM reaches max step {max_iter}.")
+    
+    return V_opt
 
 def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter = 500):
     """
