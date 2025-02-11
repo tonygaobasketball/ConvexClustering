@@ -7,9 +7,7 @@ BIC for selecting gamma.
 """
 
 import numpy as np
-import admm_cc
 import CC_split_algo
-import CC_weights_graphs
 import FBS_algo
 import funcs
 import scipy as sp
