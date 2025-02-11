@@ -11,6 +11,7 @@ import numpy as np
 from scipy.sparse import spdiags
 import scipy as sp
 import matplotlib.pyplot as plt
+from scipy.stats import entropy
 
 
 def sparse_convmtx(h, n):
@@ -630,6 +631,38 @@ def generate_gaussian_clusters(K, n, N, overlap_factor=0.05, random_seed=1):
     labels = np.array(labels)
     return data, labels, means, covariances
 
+
+def generate_gaussian_clusters_v2(K, n, N, overlap_factor=0.05, random_seed=1):
+    """
+    # Function to generate Gaussian clusters 
+    # also generate the ground-truth means for each data.
+    
+    """
+    np.random.seed(random_seed)
+    data = []
+    labels = []
+    means = []
+    GTmeans = []
+    covariances = []
+
+    for k in range(K):
+        mean = np.random.uniform(-1, 1, n)
+        means.append(mean)
+        covariance = np.random.rand(1) * np.eye(n) * 0.5
+        covariance *= overlap_factor
+        covariances.append(covariance)
+        cluster_data = np.random.multivariate_normal(mean, covariance, N)
+        # GTmeans is a matrix n by N*K, same shape of data.
+        GTmeans.append((mean.reshape([n,1]) @ np.ones([1,N])).T)
+        data.append(cluster_data)
+        labels.extend([k] * N)
+        
+    GTmeans = np.vstack(GTmeans)
+    data = np.vstack(data)
+    labels = np.array(labels)
+    return data, labels, means, covariances, GTmeans
+
+
 # Function to generate corner Gaussian clusters
 def generate_gaussian_clusters_corner(K, n, N, overlap_factor=0.05, random_seed=1):
     from itertools import product
@@ -763,3 +796,93 @@ def generate_gaussian_clusters_low4high_dim(K, p_low, p_high, N, overlap_factor=
     # data = np.vstack(data)
     # labels = np.array(labels)
     return data, labels, means, covariances
+
+
+def generate_2half_moons(num_points=8, cluster_points=7, cluster_radius=0.1, vertical_scale=0.5, random_seed = 1):
+    """
+    Generate a 2 half-moons dataset with moderately loose clusters.
+    
+    Parameters:
+    num_points (int): Number of core points in each half-moon.
+    cluster_points (int): Number of additional points per core point.
+    cluster_radius (float): Radius for generating clusters around each core point.
+    vertical_scale (float): Scaling factor for the vertical height of the moons.
+    
+    Returns:
+    np.ndarray: Data matrix (p, n) where p=2 (2D points) and n is the total number of data points.
+    """
+    # Generate first half-moon
+    theta1 = np.linspace(0, np.pi, num_points)
+    x1 = np.cos(theta1)
+    y1 = vertical_scale * np.sin(theta1)
+
+    # Generate second half-moon
+    theta2 = np.linspace(0, np.pi, num_points)
+    x2 = 1 - np.cos(theta2)
+    y2 = vertical_scale * (-np.sin(theta2) - 0.5)
+
+    # Combine the two half-moons
+    X1 = np.vstack((x1, y1)).T  # Shape (num_points, 2)
+    X2 = np.vstack((x2, y2)).T  # Shape (num_points, 2)
+    X = np.vstack((X1, X2))  # Shape (2 * num_points, 2)
+
+    # Generate clusters around each point
+    cluster_data = []
+    for i in range(X.shape[0]):
+        cluster = X[i, :] + cluster_radius * np.random.randn(cluster_points, 2)
+        cluster_data.append(cluster)
+
+    # Convert list of clusters into a single matrix
+    cluster_data = np.vstack(cluster_data)  # Shape (num_points * 2 * cluster_points, 2)
+
+    # Reshape into (p, n) format
+    dataX = cluster_data.T  # Shape (2, n)
+
+    return dataX
+
+# # Generate dataset
+# dataX = generate_2half_moons()
+
+# # Print shape of the dataset
+# print("Shape of dataX:", dataX.shape)  # Expected: (2, n)
+
+    
+def pred_labels(U):
+    """
+    Assign labels based on solution matrix U: p by n.
+    """
+    
+    # Find unique columns and assign same label to the similar columns.
+    
+    col_tol = 1e-06
+    n = U.shape[1]  # Number of columns
+    y_pred = -np.ones(n, dtype=int)  # Initialize labels with -1
+    current_label = 0
+
+    for i in range(n):
+        if y_pred[i] == -1:  # If the column is not labeled
+            # Assign a new label
+            y_pred[i] = current_label
+            # Compare with other columns
+            for j in range(i + 1, n):
+                if y_pred[j] == -1:  # Check unlabeled columns
+                    diff = np.linalg.norm(U[:, i] - U[:, j])
+                    if diff < col_tol:  # If columns are similar
+                        y_pred[j] = current_label
+            current_label += 1
+
+    return y_pred
+
+# Variation of Information (VI)
+def variation_of_information(true_labels, predicted_labels):
+    contingency_matrix = np.histogram2d(true_labels, predicted_labels)[0]
+    joint_distribution = contingency_matrix / np.sum(contingency_matrix)
+    marginal_true = np.sum(joint_distribution, axis=1)
+    marginal_pred = np.sum(joint_distribution, axis=0)
+    
+    h_true = entropy(marginal_true)
+    h_pred = entropy(marginal_pred)
+    mutual_info = np.sum(joint_distribution * np.log(joint_distribution / (marginal_true[:, None] @ marginal_pred[None, :] + 1e-10) + 1e-10))
+    
+    return h_true + h_pred - 2 * mutual_info
+

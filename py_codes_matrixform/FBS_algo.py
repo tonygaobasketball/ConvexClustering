@@ -181,7 +181,7 @@ def prox_mat_l21_admm(D, W0, gamma, rho, tol, max_iter = 500):
 
 
 
-def MPD(V_0, B, A, alpha_k=0.5, tol=1e-8, max_iterations=500):
+def MPD(V_0, B, A, theta_B = 1, alpha_k=0.5, tol=1e-8, max_iterations=500):
     """
     Matrix Proximal Descent 
     Compute the 1st iteration of the algorithm.
@@ -192,6 +192,9 @@ def MPD(V_0, B, A, alpha_k=0.5, tol=1e-8, max_iterations=500):
     B (numpy.ndarray): Matrix B.
     A (numpy.ndarray): Matrix U * B^T.
     alpha_k (float): Step size.
+    theta_B_B (float): default = 1
+        if B = theta * Dw, then
+            theta_B = 1 / (sqrt{gamma} * sig_1 (Dw)) 
     max_iterations (int): Maximum number of iterations.
     tol (float): Tolerance for convergence.
     
@@ -202,7 +205,7 @@ def MPD(V_0, B, A, alpha_k=0.5, tol=1e-8, max_iterations=500):
     V = V_0.copy()
     for k in range(max_iterations):
         # Y = np.array(V @ (np.eye(C.shape[1]) - alpha_k * C.T @ C) - alpha_k * A @ C)
-        Y = V - alpha_k * (V - A)
+        Y = V - alpha_k * theta_B * (V - A)
         V_new = np.zeros_like(V)
         for j in range(V.shape[1]):
             Y_j = Y[:, j]
@@ -221,7 +224,7 @@ def MPD(V_0, B, A, alpha_k=0.5, tol=1e-8, max_iterations=500):
 
     return V
 
-def fbs_gme3_cc_mat(D, C, sig1_C, gamma, U0, mat_x):
+def fbs_gme3_cc_mat(B, Dw, theta_B, sig1_Dw, gamma, U0, mat_x, max_iter_admm = 500):
     """
     Forward-backward splitting (FBS) algorithm for convex clustering with generalized Moreau envelope (3rd model).
     Matrix form.
@@ -233,17 +236,21 @@ def fbs_gme3_cc_mat(D, C, sig1_C, gamma, U0, mat_x):
     z^k = Prox_{\mu_k f} (y^k)
     x^k+1 = x^k + \la_k (z^k - x^k)
     
-    !!! Updated: 12/03/2024. 
+    !!! Updated: 02/01/2025. 
     Update Info: 
        1. D_w = C @ D, replace D in the 2,1 norm.
        2. Use (28.37) on page 524 of Combettes' book.
+       3. Scale the model with size of data. Equivalently, scale gamma by 
+       ga_scaled = n/m * gamma, where m,n = D.shape 
+       
     !!!
     
     
     Parameters:
     B (numpy.ndarray): Given matrix B.
     Dw (numpy.ndarray): Matrix Dw such that Dw = C D.
-    sig1_C (float):  the largest singular value of C.
+    sig1_Dw (float): Largest singular value of Dw.
+    theta_B_B (float): B = theta_B * Dw
     gamma (float): Regularization parameter, gamma > 0.
     U0 (numpy.ndarray): Initial value of solution U.
     mat_X (numpy.ndarray): Data matrix.
@@ -256,11 +263,11 @@ def fbs_gme3_cc_mat(D, C, sig1_C, gamma, U0, mat_x):
         - cput (float): CPU time running by the algorithm.
     """
     STOP_TOL = 1e-6
-    Max_Iters = 10
+    Max_Iters = 20
 
     p,n = mat_x.shape  # record dimension of data.
-    Dw = C @ D
-    B = Dw  # Define parameter B
+    mm = Dw.shape[0]
+    # ga_scaled = n / mm * gamma   # Scale with the size of dataset.
 
     # Initialization
     U = U0.copy()
@@ -270,16 +277,19 @@ def fbs_gme3_cc_mat(D, C, sig1_C, gamma, U0, mat_x):
 
     # Matrix Proximal Descent parameters.
     V_old = np.ones((p,Dw.shape[0]))
-    mat_A_MPD = U @ B.T
+    mat_A_MPD = U_old @ B.T
     # step_size_MPD = 1.5 / (sig1_C ** 2)
     step_size_MPD = 0.5
     tol_MPD = 1e-4
     max_iter_MPD = 20
+    theta_B_MPD = theta_B
     
     # ADMM parameters.
-    rho_admm = 2   # \rho-Lipschitz
+    rho_admm = 10   # \rho-Lipschitz
+    # rho_admm = (np.log2(gamma) + 20) * 2
+    # rho_admm = np.sqrt(gamma) * 20
     tol_admm = 1e-5
-    max_iter_admm = 50
+    # max_iter_admm = 500
 
     iter = 0
     relative_delta = np.inf  # Stopping criteria value
@@ -287,26 +297,26 @@ def fbs_gme3_cc_mat(D, C, sig1_C, gamma, U0, mat_x):
     start_time = time.time()   # count CPU time.
     # mu_fbs (float): Parameter of FBS algorithm.
     # la_fbs (float): Parameter of FBS algorithm.
-    mu_fbs = .5
+    mu_fbs = 1
     la_fbs = 1
 
     while (relative_delta > STOP_TOL) and (iter < Max_Iters):
         iter += 1
             
         # MPD iteration for V^k
-        C_MPD = np.eye(C.shape[0])
-        mat_A_MPD = UDw_old @ C_MPD.T
-        V = MPD(V_old, B, mat_A_MPD, step_size_MPD, tol_MPD, max_iter_MPD)
+        mat_A_MPD = U_old @ B.T 
+        V = MPD(V_old, B, mat_A_MPD, theta_B_MPD, step_size_MPD, tol_MPD, max_iter_MPD)
 
         # iterate Z^k
         # Z = (UDw_old - V) @ C.T @ B 
-        Z = (UDw_old - V) @ B 
+        Z = (U_old @ B.T - V) @ B 
         
         W = (1 - mu_fbs) * U_old + mu_fbs * (mat_x + gamma * Z) 
         
         #********
         # ADMM iteration for M^k
-        M = prox_mat_l21_admm(Dw, W, gamma, rho_admm, tol_admm, max_iter_admm)
+        M = prox_mat_l21_admm_cholsolve(Dw, W, mu_fbs * gamma, rho_admm, tol_admm, max_iter_admm)
+        # M = prox_mat_l21_admm(Dw, W, mu_fbs * gamma, rho_admm, tol_admm, max_iter_admm)
         #********
         
         U = U_old + la_fbs * (M - U_old)
@@ -343,7 +353,7 @@ def fbs_gme3_cc_mat(D, C, sig1_C, gamma, U0, mat_x):
     return U_opt, V_opt, Z_opt, cput, relative_delta
 
 
-def GME_CC_path(gamma_set, D, C, mat_x, true_cls_centers):
+def GME_CC_path(gamma_set, Dw, mat_x, true_cls_centers):
     
     """
     Input:
@@ -357,8 +367,7 @@ def GME_CC_path(gamma_set, D, C, mat_x, true_cls_centers):
         Plot the clustering paths
         
     """
-    # Singular value of Ctilde
-    sig1_C = np.linalg.norm(C, 2)
+    
     # number of gamma candidate
     numFrames = len(gamma_set)
 
@@ -367,7 +376,13 @@ def GME_CC_path(gamma_set, D, C, mat_x, true_cls_centers):
     tol_sim_path = 1e-03
     res_ = []
 
+    
+    sig1_Dw = np.linalg.norm(Dw, 2)  # Calculate largest singular value of Dw.
+    B_base = Dw 
+    # Use different B for different scale of gamma.
+    gamma_up = 1 / sig1_Dw ** 2
 
+    
     U_opt = mat_x  # initiate for U_opt = mat_x
     Count_CPUt = time.time()   # record CPU time for all loops.
     for i in range(numFrames):
@@ -376,6 +391,14 @@ def GME_CC_path(gamma_set, D, C, mat_x, true_cls_centers):
         print("gamma candidate {}".format(i))
         print("------")
         gamma = gamma_set[i]        
+        
+        if gamma <= gamma_up:
+            theta = 1
+            B = B_base
+        if gamma > gamma_up:
+            theta = 1 / (np.sqrt(gamma) * sig1_Dw)
+            B = theta * B_base   # Assign B = theta * Dw to satisfy the convexity condition.
+
         
         #### Use warm start ###
         U0 = U_opt       # initialize U
@@ -386,13 +409,13 @@ def GME_CC_path(gamma_set, D, C, mat_x, true_cls_centers):
             # GME3-CC model
             
             # U_opt, V_opt, Z_opt, cput = FBS_algo.fbs_gme3_cc_mat(D, C, sig1_C, mu, rho, gamma, U0, mat_x)
-            U_opt, V_opt, Z_opt, cput, re_tol = fbs_gme3_cc_mat(D, C, sig1_C, gamma, U0, mat_x)
+            U_opt, V_opt, Z_opt, cput, re_tol = fbs_gme3_cc_mat(B, Dw, theta, sig1_Dw, gamma, U0, mat_x)
             res_.append(re_tol)
             
             ##########################----####----####
             ## cluster path fuse function (Eric's code)
             # DU = D @ U_opt.T  # Calculate matrix V = DU
-            DU = C @ D @ U_opt.T  # Calculate matrix V = DwU
+            DU = Dw @ U_opt.T  # Calculate matrix V = DwU
             
             # Compute the Frobenius norm for each column in DU
             differences = np.linalg.norm(DU.T, axis=0)
@@ -404,7 +427,7 @@ def GME_CC_path(gamma_set, D, C, mat_x, true_cls_centers):
             
             for kk in list(connected_ix):
                 # find index pair non-zeros in kk th row of D matrix
-                ii, jj = np.where(D[kk,:] != 0)[0]    
+                ii, jj = np.where(Dw[kk,:] != 0)[0]    
                 # Build A matrix
                 AA[ii, jj] = 1
                 AA[jj, ii] = 1
@@ -431,7 +454,7 @@ def GME_CC_path(gamma_set, D, C, mat_x, true_cls_centers):
             # ===========
             # GME3-CC model
             # U0 = mat_x       # initialize U
-            U_opt, V_opt, Z_opt, cput, re_tol = fbs_gme3_cc_mat(D, C, sig1_C, gamma, U0, mat_x)
+            U_opt, V_opt, Z_opt, cput, re_tol = fbs_gme3_cc_mat(B, Dw, theta, sig1_Dw, gamma, U0, mat_x)
             res_.append(re_tol)
             # U_opt = decompose_vec(u_opt, n)
             
@@ -440,7 +463,7 @@ def GME_CC_path(gamma_set, D, C, mat_x, true_cls_centers):
             
             
             # DU = D @ U_opt.T  # Calculate matrix V = DU
-            DU = C @ D @ U_opt.T  # Calculate matrix V = DwU
+            DU = Dw @ U_opt.T  # Calculate matrix V = DwU
             
             
             
@@ -454,7 +477,7 @@ def GME_CC_path(gamma_set, D, C, mat_x, true_cls_centers):
             
             for kk in list(connected_ix):
                 # find index pair non-zeros in kk th row of D matrix
-                ii, jj = np.where(D[kk,:] != 0)[0]    
+                ii, jj = np.where(Dw[kk,:] != 0)[0]    
                 # Build A matrix
                 AA[ii, jj] = 1
                 AA[jj, ii] = 1
@@ -498,7 +521,7 @@ def GME_CC_path(gamma_set, D, C, mat_x, true_cls_centers):
         plt.ylabel('X2')
         plt.legend()
         # plt.title('toy4-5c cluster path (k_near = {})'.format(k_nearest))
-        plt.title('GME-CC path')
+        plt.title('CNC-GME path')
         plt.show()
         # plt.close
         
@@ -523,13 +546,38 @@ def GME_CC_path(gamma_set, D, C, mat_x, true_cls_centers):
         plt.ylabel('Component 2')
         plt.legend()
         # plt.title('toy4-5c cluster path (k_near = {})'.format(k_nearest))
-        plt.title('GME-CC path (first 2d)')
+        plt.title('CNC-GME  path (first 2d)')
         plt.show()
         # plt.close
     
     return avg_CPUt, centroids_tensor
 
 
+
+
+def dis_centroids2GTmean(U, GTmean):
+    """
+    Calculate the centroids to the ground truth mean.
+    Data generated with Gaussian distribution required!!!
+    
+    Input:
+        U: centroids. p by n.
+        GTmean: ground-truth means. p by n.
+        
+        
+        
+    Output:
+        Dist: distrance between U and GTmean. n-dim.
+
+    """
+    # Calculate the distance, point-wise.
+    p, n = U.shape
+    Dist_list = [np.linalg.norm(U[:,j] - GTmean[:,j], 2) for j in range(n)]
+    Dist = np.array(Dist_list)
+    
+    return Dist
+
+    
 
 def fbs_gme3_cc_mat_lpn(D, C, sig1_C, gamma, U0, mat_x):
     """

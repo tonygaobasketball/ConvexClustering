@@ -20,7 +20,7 @@ def prox_l1_norm(v, sigma):
     return np.sign(v) * np.maximum(np.abs(v) - sigma, 0)
 
 
-def convex_clustering_admm(X, D, nu, sigma, max_iter = 500, tol=1e-4):
+def convex_clustering_admm(X, D, nu, sigma, max_iter = 200, tol=1e-4):
     """
     Convex clustering using ADMM with L1 norm prox.
     
@@ -38,6 +38,7 @@ def convex_clustering_admm(X, D, nu, sigma, max_iter = 500, tol=1e-4):
     
     p, n = X.shape  # p is the dimension, n is the number of nodes
     K = D.shape[0]  # K is the number of edges
+    
     
     # Initialize variables
     U = np.copy(X)  # Initialize U to be the same as X (p by n)
@@ -68,11 +69,15 @@ def convex_clustering_admm(X, D, nu, sigma, max_iter = 500, tol=1e-4):
         for l in range(K):
             u_l1 = U[:, np.where(D[l] == 1)[0][0]]  # Node l1
             u_l2 = U[:, np.where(D[l] == -1)[0][0]]  # Node l2
-            v_new = prox_l1_norm(u_l1 - u_l2 - (1 / nu) * Lambda[:, l], sigma[l])
+            v_new = prox_l2_norm(u_l1 - u_l2 - (1 / nu) * Lambda[:, l], sigma[l])
             V[:, l] = v_new
             Lambda[:, l] = Lambda[:, l] + nu * (V[:, l] - (u_l1 - u_l2))
-        
-        # Convergence check: || V - (U[:, l1] - U[:, l2]) || < tol
+
+            
+        # Convergence check: 
+            # rr = V - (U[:, l1] - U[:, l2])
+            # ss = -nu * (sum_)
+            
         diff_sum = 0
         for l in range(K):
             u_l1 = U[:, np.where(D[l] == 1)[0][0]]  # Node l1

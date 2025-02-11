@@ -61,6 +61,9 @@ def build_incidence_matrix(U, k):
     for j, (P_j, indices_j) in enumerate(results):
         A_j = np.zeros((n, k))  # Initialize the incidence matrix with zeros
         for idx, neighbor_idx in enumerate(indices_j):
+            # print(f'j = {j}')
+            # print(f'idx = {idx}')
+            # print(f'neighbor_idx = {neighbor_idx}')
             A_j[j, idx] = 1  # Mark the edge from u_j to each of its k-nearest neighbors
             A_j[neighbor_idx, idx] = -1  # Mark the edge from u_j to each of its k-nearest neighbors
         incidence_matrices.append(A_j.T)
@@ -106,6 +109,9 @@ def get_edge_indices(D):
     for edge_index in range(num_edges):
         # Find the indices of non-zero entries in the row corresponding to the edge
         vertices = np.where(D[edge_index] != 0)[0]
+        
+        if len(vertices) != 2:
+            print(tuple(vertices))
         
         if len(vertices) == 2:
             edges.append(tuple(vertices))
@@ -330,7 +336,7 @@ def create_graph_MST_KNN(matrixData, weight_mat, k_nrst, print_G = 'y'):
         if (u, v) in edge_dict:
             if edge_dict[(u, v)] != weight:
                 # raise ValueError(f"Edge ({u}, {v}) has different weights in D1 and D2: {edge_dict[(u, v)]} vs {weight}")
-                print(f"Edge ({u}, {v}) has different weights in D1 and D2: {edge_dict[(u, v)]} vs {weight}")
+                # print(f"Edge ({u}, {v}) has different weights in D1 and D2: {edge_dict[(u, v)]} vs {weight}")
                 if edge_dict[(u, v)] < weight:
                     edge_dict[(u, v)] = weight
         else:
@@ -376,17 +382,17 @@ def create_graph_MST_KNN(matrixData, weight_mat, k_nrst, print_G = 'y'):
         # pos = {i: matrixData[:, i] for i in range(n)}
         
         # Draw the nodes
-        nx.draw_networkx_nodes(G_u, pos, node_size=10, node_color='lightblue')
+        nx.draw_networkx_nodes(G_u, pos, node_size=8, node_color='lightblue')
         
         # Draw the edges with weights
-        nx.draw_networkx_edges(G_u, pos, edgelist=G_u.edges(data=True), width=1)
+        nx.draw_networkx_edges(G_u, pos, edgelist=G_u.edges(data=True), width=0.1)
         
         # # Draw the node labels
         # nx.draw_networkx_labels(G_u, pos, font_size=6, font_color='black')
         
-        # Draw the edge labels (weights)
-        edge_labels = {(u, v): f"{d['weight']:.2f}" for u, v, d in G_u.edges(data=True)}
-        nx.draw_networkx_edge_labels(G_u, pos, edge_labels=edge_labels, font_size = 12, label_pos=0.5)
+        # # Draw the edge labels (weights)
+        # edge_labels = {(u, v): f"{d['weight']:.2f}" for u, v, d in G_u.edges(data=True)}
+        # nx.draw_networkx_edge_labels(G_u, pos, edge_labels=edge_labels, font_size = 12, label_pos=0.5)
         
         # Show the plot
         plt.title("Union Graph Visualization")
@@ -408,17 +414,15 @@ def create_graph_MST_KNN(matrixData, weight_mat, k_nrst, print_G = 'y'):
         # pos = {i: matrixData[:, i] for i in range(n)}
         
         # Draw the nodes
-        nx.draw_networkx_nodes(G_u_2d, pos_2d, node_size=10, node_color='lightblue')
+        nx.draw_networkx_nodes(G_u_2d, pos_2d, node_size=8, node_color='lightblue')
         
         # Draw the edges with weights
-        nx.draw_networkx_edges(G_u_2d, pos_2d, edgelist = G_u_2d.edges(data=True), width=1)
+        nx.draw_networkx_edges(G_u_2d, pos_2d, edgelist = G_u_2d.edges(data=True), width=.1)
         
-        # # Draw the node labels
-        # nx.draw_networkx_labels(G_u, pos, font_size=6, font_color='black')
-        
-        # Draw the edge labels (weights)
-        edge_labels = {(u, v): f"{d['weight']:.2f}" for u, v, d in G_u_2d.edges(data=True)}
-        nx.draw_networkx_edge_labels(G_u_2d, pos_2d, edge_labels=edge_labels, font_size=12, label_pos=0.5)
+
+        # # Draw the edge labels (weights)
+        # edge_labels = {(u, v): f"{d['weight']:.2f}" for u, v, d in G_u_2d.edges(data=True)}
+        # nx.draw_networkx_edge_labels(G_u_2d, pos_2d, edge_labels=edge_labels, font_size=12, label_pos=0.5)
         
         # Show the plot
         plt.title("Union Graph Visualization (first 2d)")
@@ -429,3 +433,102 @@ def create_graph_MST_KNN(matrixData, weight_mat, k_nrst, print_G = 'y'):
     
     # sig1_D = np.linalg.norm(D, 2)  # largest singular value of D matrix.
     return D_union, weights_union
+
+
+#%% --------------------------------------------------------
+# Generate DMST with t.
+from scipy.spatial.distance import pdist, squareform
+
+class UnionFind:
+    """ Helper class to implement Union-Find with path compression. """
+    def __init__(self, n):
+        self.parent = list(range(n))
+        self.rank = [0] * n
+    
+    def find(self, u):
+        if self.parent[u] != u:
+            self.parent[u] = self.find(self.parent[u])
+        return self.parent[u]
+    
+    def union(self, u, v):
+        root_u = self.find(u)
+        root_v = self.find(v)
+        if root_u != root_v:
+            if self.rank[root_u] > self.rank[root_v]:
+                self.parent[root_v] = root_u
+            elif self.rank[root_u] < self.rank[root_v]:
+                self.parent[root_u] = root_v
+            else:
+                self.parent[root_v] = root_u
+                self.rank[root_u] += 1
+            return True  # Successfully merged
+        return False  # Already in the same component (cycle detected)
+
+def build_DMST(X, W_mat, t):
+    """
+    Construct Disjoint MSTs using Kruskal's algorithm without replacement and return the graph incidence matrix D.
+    
+    Parameters:
+        X (np.ndarray): Data matrix (p, n), where p is the dimension, and n is the number of points.
+        W_mat (np.ndarray): weights for Data matrix.
+        t (int): Number of MSTs to construct.
+    
+    Returns:
+        np.ndarray: Graph incidence matrix D (m, n), where m is the number of edges across t MSTs.
+    """
+    p, n = X.shape  # Number of dimensions and points
+
+    # Step 1: Compute Pairwise Euclidean Distances
+    distances = squareform(pdist(X.T, metric='euclidean'))
+    edges = [(i, j, distances[i, j]) for i in range(n) for j in range(i + 1, n)]
+    
+    # Step 2: Sort edges by increasing distance
+    edges.sort(key=lambda x: x[2])
+
+    # Step 3: Build t MSTs using Kruskal's Algorithm without replacement
+    used_edges = set()
+    all_edges = []
+
+    for tree_idx in range(t):
+        uf = UnionFind(n)  # Reset Union-Find for each tree
+        mst_edges = []
+
+        for i, j, d in edges:
+            if (i, j) not in used_edges and uf.union(i, j):
+                mst_edges.append((i, j))
+                used_edges.add((i, j))  # Do not reuse edges for future MSTs
+            if len(mst_edges) == n - 1:  # If MST has n-1 edges, stop
+                break
+        
+        all_edges.extend(mst_edges)
+
+    # Step 4: Construct the Graph Incidence Matrix D
+    m = len(all_edges)  # Number of edges used across all MSTs
+    D = np.zeros((m, n))
+
+    for edge_idx, (i, j) in enumerate(all_edges):
+        D[edge_idx, i] = 1
+        D[edge_idx, j] = -1
+    
+    # Weights for the DMST.
+    m, n = D.shape  # Number of edges, number of nodes
+    weights_vec = np.zeros(m)  # Initialize weight vector
+
+    for edge_idx in range(m):
+        # Identify the start (i) and end (j) nodes
+        i, j = np.where(D[edge_idx] == 1)[0][0], np.where(D[edge_idx] == -1)[0][0]
+
+        # Extract weight from the weight matrix WW
+        weights_vec[edge_idx] = W_mat[i, j]  # Weight of edge (i, j)
+
+    return D, weights_vec
+
+# # Example Usage
+# p, n, t = 2, 10, 3  # 2D dataset with 10 points and 3 MSTs
+# X = np.random.rand(p, n)  # Generate random data points
+# D = build_DMST(X, t)
+
+
+# # Print result
+# print("Graph Incidence Matrix D:")
+# print(D)
